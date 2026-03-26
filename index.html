@@ -1,7 +1,435 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
+<meta charset="UTF-8"><!DOCTYPE html>
+<html lang="ja">
+<head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>図示ツール</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; padding: 1rem; background: #fff; color: #111; }
+.section-label { font-size: 13px; color: #666; margin-bottom: 6px; }
+#input-area { display: flex; gap: 8px; margin-bottom: 1.5rem; }
+#text-input { flex: 1; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; resize: vertical; min-height: 60px; }
+#parse-btn { padding: 8px 16px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; cursor: pointer; white-space: nowrap; align-self: flex-start; }
+.pool-label { font-size: 12px; color: #666; margin-bottom: 4px; }
+.token-pool { display: flex; flex-wrap: wrap; gap: 6px; min-height: 40px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; background: #f5f5f5; margin-bottom: 0.5rem; }
+.hint { font-size: 12px; color: #999; margin-bottom: 0.75rem; margin-top: 4px; }
+.token, .cell-token { padding: 4px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: #fff; cursor: pointer; user-select: none; display: inline-block; touch-action: manipulation; }
+.token.selected, .cell-token.selected { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
+.token.dragging, .cell-token.dragging { opacity: 0.3; }
+.action-bar { min-height: 32px; display: flex; align-items: center; gap: 6px; margin-bottom: 0.75rem; flex-wrap: wrap; }
+.action-btn { padding: 3px 10px; border: 1px solid #93c5fd; border-radius: 6px; background: #dbeafe; color: #1d4ed8; font-size: 12px; cursor: pointer; display: none; }
+.action-btn.visible { display: inline-block; }
+.move-group { display: none; gap: 4px; align-items: center; }
+.move-group.visible { display: flex; }
+.move-btn { padding: 3px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; cursor: pointer; background: #fff; }
+#sel-count { font-size: 12px; color: #666; }
+.diagram-wrap { border: 1px solid #ddd; border-radius: 8px; overflow: hidden; margin-bottom: 1rem; }
+table { width: 100%; border-collapse: collapse; }
+th { font-size: 12px; font-weight: 500; color: #666; padding: 6px 12px; background: #f5f5f5; border-bottom: 1px solid #ddd; }
+th.left-col { text-align: right; width: 50%; border-right: 1px solid #ddd; }
+th.right-col { text-align: left; }
+td { padding: 0; }
+td.left-col { border-right: 1px solid #ddd; border-bottom: 1px solid #ddd; }
+td.right-col { border-bottom: 1px solid #ddd; }
+tr:last-child td { border-bottom: none; }
+.cell-inner { min-height: 44px; padding: 4px 8px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.left-col .cell-inner { justify-content: flex-end; }
+.right-col .cell-inner { justify-content: flex-start; }
+.cell-inner.drag-over { background: #dbeafe; }
+.row-controls { display: flex; gap: 6px; flex-wrap: wrap; }
+.ctrl-btn { padding: 5px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; cursor: pointer; background: #fff; }
+.ctx-btn { padding: 5px 12px; border: 1px solid #93c5fd; border-radius: 6px; background: #dbeafe; color: #1d4ed8; font-size: 13px; cursor: pointer; display: none; }
+.ctx-btn.visible { display: inline-block; }
+.clear-btn { padding: 5px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; cursor: pointer; background: #fff; color: #666; margin-left: auto; }
+</style>
+</head>
+<body>
+<p class="section-label">英文を入力して「分解」を押してください</p>
+<div id="input-area">
+  <textarea id="text-input" placeholder="例: Trump accuses Starmer of seeking to join wars after we've already won"></textarea>
+  <button id="parse-btn">分解</button>
+</div>
+<p class="pool-label">語のプール</p>
+<div class="token-pool" id="token-pool"></div>
+<p class="hint">タップ／クリックで選択・再タップで解除。選択後にセルをタップで配置。セル内の語を長押しでプールに戻す。セル内の語を選択すると行の挿入・削除が可能。</p>
+<div class="action-bar">
+  <span id="sel-count"></span>
+  <div class="move-group" id="move-group">
+    <button class="move-btn" id="move-up">↑</button>
+    <button class="move-btn" id="move-down">↓</button>
+    <button class="move-btn" id="move-left">←</button>
+    <button class="move-btn" id="move-right">→</button>
+  </div>
+  <button class="action-btn" id="return-btn">プールに戻す</button>
+  <button class="action-btn" id="desel-btn">選択解除</button>
+</div>
+<div class="diagram-wrap">
+  <table>
+    <thead><tr><th class="left-col">Operation（左列）</th><th class="right-col">Entity（右列）</th></tr></thead>
+    <tbody id="diagram-body"></tbody>
+  </table>
+</div>
+<div class="row-controls">
+  <button class="ctrl-btn" id="add-row-end">＋ 末尾に行を追加</button>
+  <button class="ctx-btn" id="insert-row-above">↑ この行の上に挿入</button>
+  <button class="ctx-btn" id="delete-row">✕ この行を削除</button>
+  <button class="ctrl-btn" id="copy-tsv">TSV コピー</button>
+  <button class="clear-btn" id="clear-all">リセット</button>
+</div>
+
+<script>
+// ─── 状態オブジェクト ───────────────────────────────────────────────────────────
+// グローバル変数をすべてここに集約。
+// 読み書きは必ず State.* を経由することで、どこで何が変わるかを追跡しやすくする。
+const State = {
+  selected: [],       // { el, word }[] — 現在選択中のトークン
+  dragItems: [],      // { el, word }[] — ドラッグ中のトークン
+  rowCount: 8,        // 現在の行数
+  longPressTimer: null, // 長押し判定タイマー
+};
+
+// ─── DOM ヘルパー ────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+function getRows() {
+  return Array.from($('diagram-body').rows);
+}
+
+function getCellInner(rowIdx, col) {
+  const rows = getRows();
+  if (rowIdx < 0 || rowIdx >= rows.length) return null;
+  return rows[rowIdx].cells[col === 'left' ? 0 : 1].querySelector('.cell-inner');
+}
+
+function getTokenLoc(el) {
+  const inner = el.closest('.cell-inner');
+  if (!inner) return null;
+  const td = inner.closest('td');
+  const tr = td.closest('tr');
+  return {
+    rowIdx: getRows().indexOf(tr),
+    col: td.classList.contains('left-col') ? 'left' : 'right',
+    inner,
+    tr,
+  };
+}
+
+function getSelRowIdx() {
+  const first = State.selected.find(s => s.el.classList.contains('cell-token'));
+  if (!first) return -1;
+  const loc = getTokenLoc(first.el);
+  return loc ? loc.rowIdx : -1;
+}
+
+// ─── 選択管理 ────────────────────────────────────────────────────────────────────
+function updateUI() {
+  const n = State.selected.length;
+  $('sel-count').textContent = n > 0 ? `${n}語選択中` : '';
+  $('return-btn').classList.toggle('visible', n > 0);
+  $('desel-btn').classList.toggle('visible', n > 0);
+  const inCell = n > 0 && State.selected.every(s => s.el.classList.contains('cell-token'));
+  $('move-group').classList.toggle('visible', inCell);
+  $('insert-row-above').classList.toggle('visible', inCell);
+  $('delete-row').classList.toggle('visible', inCell);
+}
+
+function clearSel() {
+  State.selected.forEach(s => s.el.classList.remove('selected'));
+  State.selected = [];
+  updateUI();
+}
+
+function toggleSel(el, word) {
+  const idx = State.selected.findIndex(s => s.el === el);
+  if (idx >= 0) {
+    el.classList.remove('selected');
+    State.selected.splice(idx, 1);
+  } else {
+    el.classList.add('selected');
+    State.selected.push({ el, word });
+  }
+  updateUI();
+}
+
+// ─── トークン生成 ────────────────────────────────────────────────────────────────
+function addToPool(word) {
+  const t = document.createElement('span');
+  t.className = 'token';
+  t.textContent = word;
+  t.dataset.word = word;
+  t.draggable = true;
+
+  t.addEventListener('click', e => {
+    e.stopPropagation();
+    toggleSel(t, word);
+  });
+
+  t.addEventListener('dragstart', e => {
+    const alreadySelected = State.selected.find(s => s.el === t);
+    State.dragItems = alreadySelected ? State.selected.slice() : (clearSel(), [{ el: t, word }]);
+    setTimeout(() => State.dragItems.forEach(s => s.el.classList.add('dragging')), 0);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', word);
+  });
+
+  t.addEventListener('dragend', () => {
+    State.dragItems.forEach(s => s.el.classList.remove('dragging'));
+  });
+
+  $('token-pool').appendChild(t);
+}
+
+function makeCellTok(word) {
+  const t = document.createElement('span');
+  t.className = 'cell-token';
+  t.textContent = word;
+  t.dataset.word = word;
+  t.draggable = true;
+
+  t.addEventListener('click', e => {
+    e.stopPropagation();
+    toggleSel(t, word);
+  });
+
+  // 長押しでプールに返す（タッチ操作）
+  t.addEventListener('touchstart', () => {
+    State.longPressTimer = setTimeout(() => {
+      State.selected = State.selected.filter(s => s.el !== t);
+      updateUI();
+      t.parentElement?.removeChild(t);
+      addToPool(word);
+    }, 600);
+  }, { passive: true });
+  t.addEventListener('touchend', () => clearTimeout(State.longPressTimer));
+  t.addEventListener('touchmove', () => clearTimeout(State.longPressTimer));
+
+  t.addEventListener('dragstart', e => {
+    const alreadySelected = State.selected.find(s => s.el === t);
+    State.dragItems = alreadySelected ? State.selected.slice() : (clearSel(), [{ el: t, word }]);
+    setTimeout(() => State.dragItems.forEach(s => s.el.classList.add('dragging')), 0);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', word);
+  });
+
+  t.addEventListener('dragend', () => {
+    State.dragItems.forEach(s => s.el.classList.remove('dragging'));
+  });
+
+  return t;
+}
+
+// ─── セルへの配置 ────────────────────────────────────────────────────────────────
+function placeInCell(inner, items) {
+  items.forEach(({ el, word }) => {
+    el.parentElement?.removeChild(el);
+    inner.appendChild(makeCellTok(word));
+  });
+  State.selected = [];
+  State.dragItems = [];
+  updateUI();
+}
+
+// ─── 矢印移動 ────────────────────────────────────────────────────────────────────
+// 改善点: 複数語を選択した場合、それぞれの元位置を保持したまま相対的に移動する。
+// 全語が同じ行・列にある場合のみ移動を許可（異なる行にまたがる選択は不可）。
+function moveSel(dir) {
+  const cellTokens = State.selected.filter(s => s.el.classList.contains('cell-token'));
+  if (cellTokens.length === 0) return;
+
+  // 全選択語の位置を取得
+  const locs = cellTokens.map(s => getTokenLoc(s.el));
+  if (locs.some(l => l === null)) return;
+
+  // 上下移動：全語が同じ行にある場合のみ許可
+  if (dir === 'up' || dir === 'down') {
+    const rows = locs.map(l => l.rowIdx);
+    const uniqueRows = [...new Set(rows)];
+    if (uniqueRows.length > 1) return; // 複数行にまたがる場合は移動不可
+
+    const currentRow = uniqueRows[0];
+    const targetRow = dir === 'up' ? currentRow - 1 : currentRow + 1;
+
+    // 移動先のセルを列ごとに分類
+    const byCol = { left: [], right: [] };
+    cellTokens.forEach((s, i) => byCol[locs[i].col].push(s));
+
+    for (const col of ['left', 'right']) {
+      if (byCol[col].length === 0) continue;
+      const target = getCellInner(targetRow, col);
+      if (!target) return; // 移動先がなければ何もしない
+      byCol[col].forEach(({ el, word }) => {
+        el.parentElement?.removeChild(el);
+        const t = makeCellTok(word);
+        target.appendChild(t);
+        const idx = State.selected.findIndex(s => s.word === word);
+        if (idx >= 0) { State.selected[idx].el = t; t.classList.add('selected'); }
+      });
+    }
+
+  } else {
+    // 左右移動：各語を個別に反対側の列へ移動
+    const targetCol = dir === 'left' ? 'left' : 'right';
+    cellTokens.forEach((s, i) => {
+      const target = getCellInner(locs[i].rowIdx, targetCol);
+      if (!target) return;
+      s.el.parentElement?.removeChild(s.el);
+      const t = makeCellTok(s.word);
+      target.appendChild(t);
+      const idx = State.selected.findIndex(sel => sel.word === s.word && sel.el === s.el);
+      if (idx >= 0) { State.selected[idx].el = t; t.classList.add('selected'); }
+    });
+  }
+
+  updateUI();
+}
+
+// ─── セル・行の構築 ──────────────────────────────────────────────────────────────
+function makeCell(col) {
+  const td = document.createElement('td');
+  td.className = `${col}-col`;
+  const inner = document.createElement('div');
+  inner.className = 'cell-inner';
+  td.appendChild(inner);
+
+  inner.addEventListener('click', e => {
+    if (State.selected.length) {
+      e.stopPropagation();
+      placeInCell(inner, State.selected.slice());
+    }
+  });
+  inner.addEventListener('dragover', e => { e.preventDefault(); inner.classList.add('drag-over'); });
+  inner.addEventListener('dragleave', () => inner.classList.remove('drag-over'));
+  inner.addEventListener('drop', e => {
+    e.preventDefault();
+    inner.classList.remove('drag-over');
+    if (State.dragItems.length) placeInCell(inner, State.dragItems.slice());
+  });
+
+  return td;
+}
+
+function makeRow() {
+  const tr = document.createElement('tr');
+  tr.appendChild(makeCell('left'));
+  tr.appendChild(makeCell('right'));
+  return tr;
+}
+
+function buildRows(n) {
+  const tb = $('diagram-body');
+  tb.innerHTML = '';
+  for (let i = 0; i < n; i++) tb.appendChild(makeRow());
+}
+
+// ─── イベント登録 ────────────────────────────────────────────────────────────────
+$('move-up').addEventListener('click', () => moveSel('up'));
+$('move-down').addEventListener('click', () => moveSel('down'));
+$('move-left').addEventListener('click', () => moveSel('left'));
+$('move-right').addEventListener('click', () => moveSel('right'));
+
+$('add-row-end').addEventListener('click', () => {
+  $('diagram-body').appendChild(makeRow());
+  State.rowCount++;
+});
+
+$('insert-row-above').addEventListener('click', () => {
+  const ri = getSelRowIdx();
+  if (ri < 0) return;
+  $('diagram-body').insertBefore(makeRow(), getRows()[ri]);
+  State.rowCount++;
+});
+
+$('delete-row').addEventListener('click', () => {
+  const ri = getSelRowIdx();
+  if (ri < 0) return;
+  const tr = getRows()[ri];
+  tr.querySelectorAll('.cell-token').forEach(t => {
+    State.selected = State.selected.filter(s => s.el !== t);
+    addToPool(t.dataset.word);
+  });
+  tr.parentElement.removeChild(tr);
+  State.rowCount = Math.max(0, State.rowCount - 1);
+  updateUI();
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.token,.cell-token,.cell-inner,.action-bar,.row-controls')) clearSel();
+});
+
+$('return-btn').addEventListener('click', () => {
+  State.selected.slice().forEach(({ el, word }) => {
+    el.parentElement?.removeChild(el);
+    addToPool(word);
+  });
+  State.selected = [];
+  updateUI();
+});
+
+$('desel-btn').addEventListener('click', clearSel);
+
+$('parse-btn').addEventListener('click', () => {
+  const text = $('text-input').value.trim();
+  if (!text) return;
+  const words = text.match(/[a-zA-Z']+|[^\s\w]|\S+/g) || [];
+  $('token-pool').innerHTML = '';
+  clearSel();
+  words.forEach(w => addToPool(w));
+  buildRows(State.rowCount = 8);
+});
+
+$('clear-all').addEventListener('click', () => {
+  $('token-pool').innerHTML = '';
+  $('text-input').value = '';
+  clearSel();
+  buildRows(State.rowCount = 8);
+});
+
+// ─── TSV エクスポート ────────────────────────────────────────────────────────────
+// 各行の左列・右列のトークンをスペース区切りで結合し、タブで繋いだTSVを生成する。
+// 空行（両セルが空）もそのまま含める。
+// すべての種類の引用符（" " "）を ["] に統一して置換する
+function escapeQuotes(str) {
+  return str.replace(/[\u0022\u201c\u201d]/g, '["]');
+}
+
+function buildTsv() {
+  return getRows().map(tr => {
+    const cells = tr.querySelectorAll('.cell-inner');
+    const left  = escapeQuotes(Array.from(cells[0].querySelectorAll('.cell-token')).map(t => t.dataset.word).join(' '));
+    const right = escapeQuotes(Array.from(cells[1].querySelectorAll('.cell-token')).map(t => t.dataset.word).join(' '));
+    return `${left}\t${right}`;
+  }).join('\n');
+}
+
+$('copy-tsv').addEventListener('click', () => {
+  const tsv = buildTsv();
+  navigator.clipboard.writeText(tsv).then(() => {
+    const btn = $('copy-tsv');
+    const orig = btn.textContent;
+    btn.textContent = 'コピーしました';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  }).catch(() => {
+    // clipboard API が使えない環境向けのフォールバック
+    const ta = document.createElement('textarea');
+    ta.value = tsv;
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  });
+});
+
+// ─── 初期化 ──────────────────────────────────────────────────────────────────────
+buildRows(State.rowCount);
+</script>
+</body>
+</html>
+
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>図示ツール</title>
 <style>
@@ -394,7 +822,435 @@ function buildTsv() {
     const left  = Array.from(cells[0].querySelectorAll('.cell-token')).map(t => t.dataset.word).join(' ');
     const right = Array.from(cells[1].querySelectorAll('.cell-token')).map(t => t.dataset.word).join(' ');
     return `${left}\t${right}`;
+  }).join('\<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>図示ツール</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; padding: 1rem; background: #fff; color: #111; }
+.section-label { font-size: 13px; color: #666; margin-bottom: 6px; }
+#input-area { display: flex; gap: 8px; margin-bottom: 1.5rem; }
+#text-input { flex: 1; padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; resize: vertical; min-height: 60px; }
+#parse-btn { padding: 8px 16px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; cursor: pointer; white-space: nowrap; align-self: flex-start; }
+.pool-label { font-size: 12px; color: #666; margin-bottom: 4px; }
+.token-pool { display: flex; flex-wrap: wrap; gap: 6px; min-height: 40px; padding: 10px; border: 1px solid #ddd; border-radius: 6px; background: #f5f5f5; margin-bottom: 0.5rem; }
+.hint { font-size: 12px; color: #999; margin-bottom: 0.75rem; margin-top: 4px; }
+.token, .cell-token { padding: 4px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; background: #fff; cursor: pointer; user-select: none; display: inline-block; touch-action: manipulation; }
+.token.selected, .cell-token.selected { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
+.token.dragging, .cell-token.dragging { opacity: 0.3; }
+.action-bar { min-height: 32px; display: flex; align-items: center; gap: 6px; margin-bottom: 0.75rem; flex-wrap: wrap; }
+.action-btn { padding: 3px 10px; border: 1px solid #93c5fd; border-radius: 6px; background: #dbeafe; color: #1d4ed8; font-size: 12px; cursor: pointer; display: none; }
+.action-btn.visible { display: inline-block; }
+.move-group { display: none; gap: 4px; align-items: center; }
+.move-group.visible { display: flex; }
+.move-btn { padding: 3px 8px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; cursor: pointer; background: #fff; }
+#sel-count { font-size: 12px; color: #666; }
+.diagram-wrap { border: 1px solid #ddd; border-radius: 8px; overflow: hidden; margin-bottom: 1rem; }
+table { width: 100%; border-collapse: collapse; }
+th { font-size: 12px; font-weight: 500; color: #666; padding: 6px 12px; background: #f5f5f5; border-bottom: 1px solid #ddd; }
+th.left-col { text-align: right; width: 50%; border-right: 1px solid #ddd; }
+th.right-col { text-align: left; }
+td { padding: 0; }
+td.left-col { border-right: 1px solid #ddd; border-bottom: 1px solid #ddd; }
+td.right-col { border-bottom: 1px solid #ddd; }
+tr:last-child td { border-bottom: none; }
+.cell-inner { min-height: 44px; padding: 4px 8px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.left-col .cell-inner { justify-content: flex-end; }
+.right-col .cell-inner { justify-content: flex-start; }
+.cell-inner.drag-over { background: #dbeafe; }
+.row-controls { display: flex; gap: 6px; flex-wrap: wrap; }
+.ctrl-btn { padding: 5px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; cursor: pointer; background: #fff; }
+.ctx-btn { padding: 5px 12px; border: 1px solid #93c5fd; border-radius: 6px; background: #dbeafe; color: #1d4ed8; font-size: 13px; cursor: pointer; display: none; }
+.ctx-btn.visible { display: inline-block; }
+.clear-btn { padding: 5px 12px; border: 1px solid #ccc; border-radius: 6px; font-size: 13px; cursor: pointer; background: #fff; color: #666; margin-left: auto; }
+</style>
+</head>
+<body>
+<p class="section-label">英文を入力して「分解」を押してください</p>
+<div id="input-area">
+  <textarea id="text-input" placeholder="例: Trump accuses Starmer of seeking to join wars after we've already won"></textarea>
+  <button id="parse-btn">分解</button>
+</div>
+<p class="pool-label">語のプール</p>
+<div class="token-pool" id="token-pool"></div>
+<p class="hint">タップ／クリックで選択・再タップで解除。選択後にセルをタップで配置。セル内の語を長押しでプールに戻す。セル内の語を選択すると行の挿入・削除が可能。</p>
+<div class="action-bar">
+  <span id="sel-count"></span>
+  <div class="move-group" id="move-group">
+    <button class="move-btn" id="move-up">↑</button>
+    <button class="move-btn" id="move-down">↓</button>
+    <button class="move-btn" id="move-left">←</button>
+    <button class="move-btn" id="move-right">→</button>
+  </div>
+  <button class="action-btn" id="return-btn">プールに戻す</button>
+  <button class="action-btn" id="desel-btn">選択解除</button>
+</div>
+<div class="diagram-wrap">
+  <table>
+    <thead><tr><th class="left-col">Operation（左列）</th><th class="right-col">Entity（右列）</th></tr></thead>
+    <tbody id="diagram-body"></tbody>
+  </table>
+</div>
+<div class="row-controls">
+  <button class="ctrl-btn" id="add-row-end">＋ 末尾に行を追加</button>
+  <button class="ctx-btn" id="insert-row-above">↑ この行の上に挿入</button>
+  <button class="ctx-btn" id="delete-row">✕ この行を削除</button>
+  <button class="ctrl-btn" id="copy-tsv">TSV コピー</button>
+  <button class="clear-btn" id="clear-all">リセット</button>
+</div>
+
+<script>
+// ─── 状態オブジェクト ───────────────────────────────────────────────────────────
+// グローバル変数をすべてここに集約。
+// 読み書きは必ず State.* を経由することで、どこで何が変わるかを追跡しやすくする。
+const State = {
+  selected: [],       // { el, word }[] — 現在選択中のトークン
+  dragItems: [],      // { el, word }[] — ドラッグ中のトークン
+  rowCount: 8,        // 現在の行数
+  longPressTimer: null, // 長押し判定タイマー
+};
+
+// ─── DOM ヘルパー ────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+
+function getRows() {
+  return Array.from($('diagram-body').rows);
+}
+
+function getCellInner(rowIdx, col) {
+  const rows = getRows();
+  if (rowIdx < 0 || rowIdx >= rows.length) return null;
+  return rows[rowIdx].cells[col === 'left' ? 0 : 1].querySelector('.cell-inner');
+}
+
+function getTokenLoc(el) {
+  const inner = el.closest('.cell-inner');
+  if (!inner) return null;
+  const td = inner.closest('td');
+  const tr = td.closest('tr');
+  return {
+    rowIdx: getRows().indexOf(tr),
+    col: td.classList.contains('left-col') ? 'left' : 'right',
+    inner,
+    tr,
+  };
+}
+
+function getSelRowIdx() {
+  const first = State.selected.find(s => s.el.classList.contains('cell-token'));
+  if (!first) return -1;
+  const loc = getTokenLoc(first.el);
+  return loc ? loc.rowIdx : -1;
+}
+
+// ─── 選択管理 ────────────────────────────────────────────────────────────────────
+function updateUI() {
+  const n = State.selected.length;
+  $('sel-count').textContent = n > 0 ? `${n}語選択中` : '';
+  $('return-btn').classList.toggle('visible', n > 0);
+  $('desel-btn').classList.toggle('visible', n > 0);
+  const inCell = n > 0 && State.selected.every(s => s.el.classList.contains('cell-token'));
+  $('move-group').classList.toggle('visible', inCell);
+  $('insert-row-above').classList.toggle('visible', inCell);
+  $('delete-row').classList.toggle('visible', inCell);
+}
+
+function clearSel() {
+  State.selected.forEach(s => s.el.classList.remove('selected'));
+  State.selected = [];
+  updateUI();
+}
+
+function toggleSel(el, word) {
+  const idx = State.selected.findIndex(s => s.el === el);
+  if (idx >= 0) {
+    el.classList.remove('selected');
+    State.selected.splice(idx, 1);
+  } else {
+    el.classList.add('selected');
+    State.selected.push({ el, word });
+  }
+  updateUI();
+}
+
+// ─── トークン生成 ────────────────────────────────────────────────────────────────
+function addToPool(word) {
+  const t = document.createElement('span');
+  t.className = 'token';
+  t.textContent = word;
+  t.dataset.word = word;
+  t.draggable = true;
+
+  t.addEventListener('click', e => {
+    e.stopPropagation();
+    toggleSel(t, word);
+  });
+
+  t.addEventListener('dragstart', e => {
+    const alreadySelected = State.selected.find(s => s.el === t);
+    State.dragItems = alreadySelected ? State.selected.slice() : (clearSel(), [{ el: t, word }]);
+    setTimeout(() => State.dragItems.forEach(s => s.el.classList.add('dragging')), 0);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', word);
+  });
+
+  t.addEventListener('dragend', () => {
+    State.dragItems.forEach(s => s.el.classList.remove('dragging'));
+  });
+
+  $('token-pool').appendChild(t);
+}
+
+function makeCellTok(word) {
+  const t = document.createElement('span');
+  t.className = 'cell-token';
+  t.textContent = word;
+  t.dataset.word = word;
+  t.draggable = true;
+
+  t.addEventListener('click', e => {
+    e.stopPropagation();
+    toggleSel(t, word);
+  });
+
+  // 長押しでプールに返す（タッチ操作）
+  t.addEventListener('touchstart', () => {
+    State.longPressTimer = setTimeout(() => {
+      State.selected = State.selected.filter(s => s.el !== t);
+      updateUI();
+      t.parentElement?.removeChild(t);
+      addToPool(word);
+    }, 600);
+  }, { passive: true });
+  t.addEventListener('touchend', () => clearTimeout(State.longPressTimer));
+  t.addEventListener('touchmove', () => clearTimeout(State.longPressTimer));
+
+  t.addEventListener('dragstart', e => {
+    const alreadySelected = State.selected.find(s => s.el === t);
+    State.dragItems = alreadySelected ? State.selected.slice() : (clearSel(), [{ el: t, word }]);
+    setTimeout(() => State.dragItems.forEach(s => s.el.classList.add('dragging')), 0);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', word);
+  });
+
+  t.addEventListener('dragend', () => {
+    State.dragItems.forEach(s => s.el.classList.remove('dragging'));
+  });
+
+  return t;
+}
+
+// ─── セルへの配置 ────────────────────────────────────────────────────────────────
+function placeInCell(inner, items) {
+  items.forEach(({ el, word }) => {
+    el.parentElement?.removeChild(el);
+    inner.appendChild(makeCellTok(word));
+  });
+  State.selected = [];
+  State.dragItems = [];
+  updateUI();
+}
+
+// ─── 矢印移動 ────────────────────────────────────────────────────────────────────
+// 改善点: 複数語を選択した場合、それぞれの元位置を保持したまま相対的に移動する。
+// 全語が同じ行・列にある場合のみ移動を許可（異なる行にまたがる選択は不可）。
+function moveSel(dir) {
+  const cellTokens = State.selected.filter(s => s.el.classList.contains('cell-token'));
+  if (cellTokens.length === 0) return;
+
+  // 全選択語の位置を取得
+  const locs = cellTokens.map(s => getTokenLoc(s.el));
+  if (locs.some(l => l === null)) return;
+
+  // 上下移動：全語が同じ行にある場合のみ許可
+  if (dir === 'up' || dir === 'down') {
+    const rows = locs.map(l => l.rowIdx);
+    const uniqueRows = [...new Set(rows)];
+    if (uniqueRows.length > 1) return; // 複数行にまたがる場合は移動不可
+
+    const currentRow = uniqueRows[0];
+    const targetRow = dir === 'up' ? currentRow - 1 : currentRow + 1;
+
+    // 移動先のセルを列ごとに分類
+    const byCol = { left: [], right: [] };
+    cellTokens.forEach((s, i) => byCol[locs[i].col].push(s));
+
+    for (const col of ['left', 'right']) {
+      if (byCol[col].length === 0) continue;
+      const target = getCellInner(targetRow, col);
+      if (!target) return; // 移動先がなければ何もしない
+      byCol[col].forEach(({ el, word }) => {
+        el.parentElement?.removeChild(el);
+        const t = makeCellTok(word);
+        target.appendChild(t);
+        const idx = State.selected.findIndex(s => s.word === word);
+        if (idx >= 0) { State.selected[idx].el = t; t.classList.add('selected'); }
+      });
+    }
+
+  } else {
+    // 左右移動：各語を個別に反対側の列へ移動
+    const targetCol = dir === 'left' ? 'left' : 'right';
+    cellTokens.forEach((s, i) => {
+      const target = getCellInner(locs[i].rowIdx, targetCol);
+      if (!target) return;
+      s.el.parentElement?.removeChild(s.el);
+      const t = makeCellTok(s.word);
+      target.appendChild(t);
+      const idx = State.selected.findIndex(sel => sel.word === s.word && sel.el === s.el);
+      if (idx >= 0) { State.selected[idx].el = t; t.classList.add('selected'); }
+    });
+  }
+
+  updateUI();
+}
+
+// ─── セル・行の構築 ──────────────────────────────────────────────────────────────
+function makeCell(col) {
+  const td = document.createElement('td');
+  td.className = `${col}-col`;
+  const inner = document.createElement('div');
+  inner.className = 'cell-inner';
+  td.appendChild(inner);
+
+  inner.addEventListener('click', e => {
+    if (State.selected.length) {
+      e.stopPropagation();
+      placeInCell(inner, State.selected.slice());
+    }
+  });
+  inner.addEventListener('dragover', e => { e.preventDefault(); inner.classList.add('drag-over'); });
+  inner.addEventListener('dragleave', () => inner.classList.remove('drag-over'));
+  inner.addEventListener('drop', e => {
+    e.preventDefault();
+    inner.classList.remove('drag-over');
+    if (State.dragItems.length) placeInCell(inner, State.dragItems.slice());
+  });
+
+  return td;
+}
+
+function makeRow() {
+  const tr = document.createElement('tr');
+  tr.appendChild(makeCell('left'));
+  tr.appendChild(makeCell('right'));
+  return tr;
+}
+
+function buildRows(n) {
+  const tb = $('diagram-body');
+  tb.innerHTML = '';
+  for (let i = 0; i < n; i++) tb.appendChild(makeRow());
+}
+
+// ─── イベント登録 ────────────────────────────────────────────────────────────────
+$('move-up').addEventListener('click', () => moveSel('up'));
+$('move-down').addEventListener('click', () => moveSel('down'));
+$('move-left').addEventListener('click', () => moveSel('left'));
+$('move-right').addEventListener('click', () => moveSel('right'));
+
+$('add-row-end').addEventListener('click', () => {
+  $('diagram-body').appendChild(makeRow());
+  State.rowCount++;
+});
+
+$('insert-row-above').addEventListener('click', () => {
+  const ri = getSelRowIdx();
+  if (ri < 0) return;
+  $('diagram-body').insertBefore(makeRow(), getRows()[ri]);
+  State.rowCount++;
+});
+
+$('delete-row').addEventListener('click', () => {
+  const ri = getSelRowIdx();
+  if (ri < 0) return;
+  const tr = getRows()[ri];
+  tr.querySelectorAll('.cell-token').forEach(t => {
+    State.selected = State.selected.filter(s => s.el !== t);
+    addToPool(t.dataset.word);
+  });
+  tr.parentElement.removeChild(tr);
+  State.rowCount = Math.max(0, State.rowCount - 1);
+  updateUI();
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.token,.cell-token,.cell-inner,.action-bar,.row-controls')) clearSel();
+});
+
+$('return-btn').addEventListener('click', () => {
+  State.selected.slice().forEach(({ el, word }) => {
+    el.parentElement?.removeChild(el);
+    addToPool(word);
+  });
+  State.selected = [];
+  updateUI();
+});
+
+$('desel-btn').addEventListener('click', clearSel);
+
+$('parse-btn').addEventListener('click', () => {
+  const text = $('text-input').value.trim();
+  if (!text) return;
+  const words = text.match(/[a-zA-Z']+|[^\s\w]|\S+/g) || [];
+  $('token-pool').innerHTML = '';
+  clearSel();
+  words.forEach(w => addToPool(w));
+  buildRows(State.rowCount = 8);
+});
+
+$('clear-all').addEventListener('click', () => {
+  $('token-pool').innerHTML = '';
+  $('text-input').value = '';
+  clearSel();
+  buildRows(State.rowCount = 8);
+});
+
+// ─── TSV エクスポート ────────────────────────────────────────────────────────────
+// 各行の左列・右列のトークンをスペース区切りで結合し、タブで繋いだTSVを生成する。
+// 空行（両セルが空）もそのまま含める。
+// すべての種類の引用符（" " "）を ["] に統一して置換する
+function escapeQuotes(str) {
+  return str.replace(/[\u0022\u201c\u201d]/g, '["]');
+}
+
+function buildTsv() {
+  return getRows().map(tr => {
+    const cells = tr.querySelectorAll('.cell-inner');
+    const left  = escapeQuotes(Array.from(cells[0].querySelectorAll('.cell-token')).map(t => t.dataset.word).join(' '));
+    const right = escapeQuotes(Array.from(cells[1].querySelectorAll('.cell-token')).map(t => t.dataset.word).join(' '));
+    return `${left}\t${right}`;
   }).join('\n');
+}
+
+$('copy-tsv').addEventListener('click', () => {
+  const tsv = buildTsv();
+  navigator.clipboard.writeText(tsv).then(() => {
+    const btn = $('copy-tsv');
+    const orig = btn.textContent;
+    btn.textContent = 'コピーしました';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  }).catch(() => {
+    // clipboard API が使えない環境向けのフォールバック
+    const ta = document.createElement('textarea');
+    ta.value = tsv;
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  });
+});
+
+// ─── 初期化 ──────────────────────────────────────────────────────────────────────
+buildRows(State.rowCount);
+</script>
+</body>
+</html>
+n');
 }
 
 $('copy-tsv').addEventListener('click', () => {
